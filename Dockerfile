@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     libc6 \
     libssl-dev \
     ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-chef
 
 WORKDIR /ethrex
