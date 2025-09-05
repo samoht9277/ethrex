@@ -163,7 +163,7 @@ jobs:
       - name: Install solc
         uses: lambdaclass/get-solc@master
         with:
-          version: v0.8.29
+          version: v0.8.30
           token: ${{ secrets.GITHUB_TOKEN || '' }}
 
       - name: Build prover
@@ -446,7 +446,7 @@ jobs:
       - name: Install solc
         uses: lambdaclass/get-solc@master
         with:
-          version: v0.8.29
+          version: v0.8.30
           token: ${{ secrets.GITHUB_TOKEN || '' }}
 
       - name: Start L1 & Deploy contracts
