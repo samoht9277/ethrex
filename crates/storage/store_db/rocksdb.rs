@@ -611,6 +611,7 @@ impl Store {
 impl StoreEngine for Store {
     async fn apply_updates(&self, update_batch: UpdateBatch) -> Result<(), StoreError> {
         let db = self.db.clone();
+        let db_clone = db.clone();
         let trie_cache = self.trie_cache.clone();
         let parent_state_root = self
             .get_block_header_by_hash(
@@ -662,39 +663,82 @@ impl StoreEngine for Store {
             let _span = tracing::trace_span!("Block DB update").entered();
             let mut batch = WriteBatch::default();
 
-            let mut updated_trie = false;
-
             let span = tracing::info_span!(
                 "trie_cache_write_lock",
                 ?parent_state_root,
                 ?last_state_root
             );
             let mut trie = trie_cache.write().map_err(|_| StoreError::LockError)?;
-            if let Some(root) = trie.get_commitable(parent_state_root, COMMIT_THRESHOLD) {
-                updated_trie = true;
-                // If the channel is closed, there's nobody to notify
-                let _ = flatkeyvalue_control_tx.send(FKVGeneratorControlMessage::Stop);
 
-                let last_written = db.get_cf(&cf_misc, "last_written")?.unwrap_or_default();
-                let nodes = trie.commit(root).unwrap_or_default();
-                for (key, value) in nodes {
-                    let is_leaf = key.len() == 65 || key.len() == 131;
+            let trie_cache_clone = trie_cache.clone();
+            let flatkeyvalue_control_tx_clone = flatkeyvalue_control_tx.clone();
+            tokio::task::spawn_blocking(move || {
+                let mut trie = trie_cache_clone
+                    .write()
+                    .map_err(|_| StoreError::LockError)
+                    .unwrap();
+                if let Some(root) = trie.get_commitable(parent_state_root, COMMIT_THRESHOLD) {
+                    let [
+                        cf_trie_nodes,
+                        cf_flatkeyvalue,
+                        cf_receipts,
+                        cf_codes,
+                        cf_block_numbers,
+                        cf_tx_locations,
+                        cf_headers,
+                        cf_bodies,
+                        cf_misc,
+                    ] = open_cfs(
+                        &db_clone,
+                        [
+                            CF_TRIE_NODES,
+                            CF_FLATKEYVALUE,
+                            CF_RECEIPTS,
+                            CF_ACCOUNT_CODES,
+                            CF_BLOCK_NUMBERS,
+                            CF_TRANSACTION_LOCATIONS,
+                            CF_HEADERS,
+                            CF_BODIES,
+                            CF_MISC_VALUES,
+                        ],
+                    )
+                    .unwrap();
 
-                    if is_leaf && key > last_written {
-                        continue;
+                    let mut updated_trie = false;
+                    let mut batch = WriteBatch::default();
+                    updated_trie = true;
+                    // If the channel is closed, there's nobody to notify
+                    let _ = flatkeyvalue_control_tx_clone.send(FKVGeneratorControlMessage::Stop);
+
+                    let last_written = db_clone
+                        .get_cf(&cf_misc, "last_written")
+                        .unwrap()
+                        .unwrap_or_default();
+                    let nodes = trie.commit(root).unwrap_or_default();
+                    for (key, value) in nodes {
+                        let is_leaf = key.len() == 65 || key.len() == 131;
+
+                        if is_leaf && key > last_written {
+                            continue;
+                        }
+                        let cf = if is_leaf {
+                            &cf_flatkeyvalue
+                        } else {
+                            &cf_trie_nodes
+                        };
+                        if value.is_empty() {
+                            batch.delete_cf(cf, key);
+                        } else {
+                            batch.put_cf(cf, key, value);
+                        }
                     }
-                    let cf = if is_leaf {
-                        &cf_flatkeyvalue
-                    } else {
-                        &cf_trie_nodes
-                    };
-                    if value.is_empty() {
-                        batch.delete_cf(cf, key);
-                    } else {
-                        batch.put_cf(cf, key, value);
+
+                    if updated_trie {
+                        // If the channel is closed, there's nobody to notify
+                        let _ = flatkeyvalue_control_tx.send(FKVGeneratorControlMessage::Continue);
                     }
                 }
-            }
+            });
             trie.put_batch(
                 parent_state_root,
                 last_state_root,
@@ -754,10 +798,6 @@ impl StoreEngine for Store {
             let ret = db
                 .write(batch)
                 .map_err(|e| StoreError::Custom(format!("RocksDB batch write error: {}", e)));
-            if updated_trie {
-                // If the channel is closed, there's nobody to notify
-                let _ = flatkeyvalue_control_tx.send(FKVGeneratorControlMessage::Continue);
-            }
             ret
         })
         .await
