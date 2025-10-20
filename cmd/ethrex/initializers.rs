@@ -513,6 +513,11 @@ async fn regenerate_head_state(store: &Store, blockchain: &Arc<Blockchain>) -> e
     let mut current_last_header = last_header;
 
     while !store.has_state_root(current_last_header.state_root)? {
+        if current_last_header.number == 0 {
+            return Err(eyre::eyre!(
+                "Unknown state found in DB. Please run `ethrex removedb` and restart node"
+            ));
+        }
         let parent_number = current_last_header.number - 1;
         debug!("Need to regenerate state for block {parent_number}");
         let Some(parent_header) = store.get_block_header(parent_number)? else {
