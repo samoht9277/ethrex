@@ -908,46 +908,46 @@ async fn handle_incoming_message(
         }
         Message::Transactions(txs) if peer_supports_eth => {
             // https://github.com/ethereum/devp2p/blob/master/caps/eth.md#transactions-0x02
-            if state.blockchain.is_synced() {
-                #[cfg(feature = "l2")]
-                let is_l2_mode = state.l2_state.is_supported();
-                for tx in &txs.transactions {
-                    // Reject blob transactions in L2 mode
-                    #[cfg(feature = "l2")]
-                    if is_l2_mode && matches!(tx, Transaction::EIP4844Transaction(_)) {
-                        log_peer_debug(
-                            &state.node,
-                            "Rejecting blob transaction in L2 mode - blob transactions are not supported in L2",
-                        );
-                        continue;
-                    }
+            // if state.blockchain.is_synced() {
+            //     #[cfg(feature = "l2")]
+            //     let is_l2_mode = state.l2_state.is_supported();
+            //     for tx in &txs.transactions {
+            //         // Reject blob transactions in L2 mode
+            //         #[cfg(feature = "l2")]
+            //         if is_l2_mode && matches!(tx, Transaction::EIP4844Transaction(_)) {
+            //             log_peer_debug(
+            //                 &state.node,
+            //                 "Rejecting blob transaction in L2 mode - blob transactions are not supported in L2",
+            //             );
+            //             continue;
+            //         }
 
-                    if let Err(e) = state.blockchain.add_transaction_to_pool(tx.clone()).await {
-                        log_peer_debug(&state.node, &format!("Error adding transaction: {e}"));
-                        continue;
-                    }
-                }
-                state
-                    .tx_broadcaster
-                    .cast(InMessage::AddTxs(
-                        txs.transactions.iter().map(|tx| tx.hash()).collect(),
-                        state.node.node_id(),
-                    ))
-                    .await
-                    .map_err(|e| PeerConnectionError::BroadcastError(e.to_string()))?;
-            }
+            //         if let Err(e) = state.blockchain.add_transaction_to_pool(tx.clone()).await {
+            //             log_peer_debug(&state.node, &format!("Error adding transaction: {e}"));
+            //             continue;
+            //         }
+            //     }
+            //     state
+            //         .tx_broadcaster
+            //         .cast(InMessage::AddTxs(
+            //             txs.transactions.iter().map(|tx| tx.hash()).collect(),
+            //             state.node.node_id(),
+            //         ))
+            //         .await
+            //         .map_err(|e| PeerConnectionError::BroadcastError(e.to_string()))?;
+            // }
         }
         Message::GetBlockHeaders(msg_data) if peer_supports_eth => {
             let response = BlockHeaders {
                 id: msg_data.id,
-                block_headers: msg_data.fetch_headers(&state.storage).await,
+                block_headers: vec![],
             };
             send(state, Message::BlockHeaders(response)).await?;
         }
         Message::GetBlockBodies(msg_data) if peer_supports_eth => {
             let response = BlockBodies {
                 id: msg_data.id,
-                block_bodies: msg_data.fetch_blocks(&state.storage).await,
+                block_bodies: vec![],
             };
             send(state, Message::BlockBodies(response)).await?;
         }
