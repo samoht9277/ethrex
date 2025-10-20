@@ -1046,10 +1046,11 @@ async fn handle_incoming_message(
         }
         Message::GetTrieNodes(req) => {
             let id = req.id;
-            match process_trie_nodes_request(req, state.storage.clone()).await {
-                Ok(response) => send(state, Message::TrieNodes(response)).await?,
-                Err(_) => send(state, Message::TrieNodes(TrieNodes { id, nodes: vec![] })).await?,
-            }
+            // match process_trie_nodes_request(req, state.storage.clone()).await {
+            //     Ok(response) => send(state, Message::TrieNodes(response)).await?,
+            //     Err(_) => send(state, Message::TrieNodes(TrieNodes { id, nodes: vec![] })).await?,
+            // }
+            send(state, Message::TrieNodes(TrieNodes { id, nodes: vec![] })).await?
         }
         #[cfg(feature = "l2")]
         Message::L2(req) if peer_supports_l2 => {

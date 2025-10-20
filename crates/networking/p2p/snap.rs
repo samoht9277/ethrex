@@ -52,49 +52,49 @@ pub async fn process_storage_ranges_request(
         let mut proof = vec![];
         let mut bytes_used = 0;
 
-        for hashed_address in request.account_hashes {
-            let mut account_slots = vec![];
-            let mut res_capped = false;
+        // for hashed_address in request.account_hashes {
+        //     let mut account_slots = vec![];
+        //     let mut res_capped = false;
 
-            if let Some(storage_iter) =
-                store.iter_storage_from(request.root_hash, hashed_address, request.starting_hash)?
-            {
-                for (hash, data) in storage_iter {
-                    debug_assert!(hash >= request.starting_hash);
-                    bytes_used += 64_u64; // slot size
-                    account_slots.push(StorageSlot { hash, data });
-                    if hash >= request.limit_hash || bytes_used >= request.response_bytes {
-                        if bytes_used >= request.response_bytes {
-                            res_capped = true;
-                        }
-                        break;
-                    }
-                }
-            }
+        //     if let Some(storage_iter) =
+        //         store.iter_storage_from(request.root_hash, hashed_address, request.starting_hash)?
+        //     {
+        //         for (hash, data) in storage_iter {
+        //             debug_assert!(hash >= request.starting_hash);
+        //             bytes_used += 64_u64; // slot size
+        //             account_slots.push(StorageSlot { hash, data });
+        //             if hash >= request.limit_hash || bytes_used >= request.response_bytes {
+        //                 if bytes_used >= request.response_bytes {
+        //                     res_capped = true;
+        //                 }
+        //                 break;
+        //             }
+        //         }
+        //     }
 
-            // Generate proofs only if the response doesn't contain the full storage range for the account
-            // Aka if the starting hash is not zero or if the response was capped due to byte limit
-            if !request.starting_hash.is_zero() || res_capped && !account_slots.is_empty() {
-                proof.extend(proof_to_encodable(
-                    store
-                        .get_storage_range_proof(
-                            request.root_hash,
-                            hashed_address,
-                            request.starting_hash,
-                            account_slots.last().map(|acc| acc.hash),
-                        )?
-                        .unwrap_or_default(),
-                ));
-            }
+        //     // Generate proofs only if the response doesn't contain the full storage range for the account
+        //     // Aka if the starting hash is not zero or if the response was capped due to byte limit
+        //     if !request.starting_hash.is_zero() || res_capped && !account_slots.is_empty() {
+        //         proof.extend(proof_to_encodable(
+        //             store
+        //                 .get_storage_range_proof(
+        //                     request.root_hash,
+        //                     hashed_address,
+        //                     request.starting_hash,
+        //                     account_slots.last().map(|acc| acc.hash),
+        //                 )?
+        //                 .unwrap_or_default(),
+        //         ));
+        //     }
 
-            if !account_slots.is_empty() {
-                slots.push(account_slots);
-            }
+        //     if !account_slots.is_empty() {
+        //         slots.push(account_slots);
+        //     }
 
-            if bytes_used >= request.response_bytes {
-                break;
-            }
-        }
+        //     if bytes_used >= request.response_bytes {
+        //         break;
+        //     }
+        // }
         Ok(StorageRanges {
             id: request.id,
             slots,
@@ -111,15 +111,15 @@ pub fn process_byte_codes_request(
 ) -> Result<ByteCodes, StoreError> {
     let mut codes = vec![];
     let mut bytes_used = 0;
-    for code_hash in request.hashes {
-        if let Some(code) = store.get_account_code(code_hash)? {
-            bytes_used += code.len() as u64;
-            codes.push(code);
-        }
-        if bytes_used >= request.bytes {
-            break;
-        }
-    }
+    // for code_hash in request.hashes {
+    //     if let Some(code) = store.get_account_code(code_hash)? {
+    //         bytes_used += code.len() as u64;
+    //         codes.push(code);
+    //     }
+    //     if bytes_used >= request.bytes {
+    //         break;
+    //     }
+    // }
     Ok(ByteCodes {
         id: request.id,
         codes,
