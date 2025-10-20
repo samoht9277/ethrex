@@ -19,20 +19,21 @@ pub async fn process_account_range_request(
     tokio::task::spawn_blocking(move || {
         let mut accounts = vec![];
         let mut bytes_used = 0;
-        for (hash, account) in store.iter_accounts_from(request.root_hash, request.starting_hash)? {
-            debug_assert!(hash >= request.starting_hash);
-            let account = AccountStateSlim::from(account);
-            bytes_used += 32 + account.length() as u64;
-            accounts.push(AccountRangeUnit { hash, account });
-            if hash >= request.limit_hash || bytes_used >= request.response_bytes {
-                break;
-            }
-        }
-        let proof = proof_to_encodable(store.get_account_range_proof(
-            request.root_hash,
-            request.starting_hash,
-            accounts.last().map(|acc| acc.hash),
-        )?);
+        // for (hash, account) in store.iter_accounts_from(request.root_hash, request.starting_hash)? {
+        //     debug_assert!(hash >= request.starting_hash);
+        //     let account = AccountStateSlim::from(account);
+        //     bytes_used += 32 + account.length() as u64;
+        //     accounts.push(AccountRangeUnit { hash, account });
+        //     if hash >= request.limit_hash || bytes_used >= request.response_bytes {
+        //         break;
+        //     }
+        // }
+        // let proof = proof_to_encodable(store.get_account_range_proof(
+        //     request.root_hash,
+        //     request.starting_hash,
+        //     accounts.last().map(|acc| acc.hash),
+        // )?);
+        let proof = vec![];
         Ok(AccountRange {
             id: request.id,
             accounts,
