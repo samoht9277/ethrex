@@ -128,12 +128,16 @@ impl TrieDB for TrieWrapper {
     }
     fn get(&self, key: Nibbles) -> Result<Option<Vec<u8>>, TrieError> {
         let key = apply_prefix(self.prefix, key);
-        if let Some(value) = self
-            .inner
-            .read()
-            .map_err(|_| TrieError::LockError)?
-            .get(self.state_root, key.clone())
-        {
+        let value = {
+            let span = tracing::info_span!("trie_layer_cache_get", ?self.state_root, ?key);
+            let value = self
+                .inner
+                .read()
+                .map_err(|_| TrieError::LockError)?
+                .get(self.state_root, key.clone());
+            value
+        };
+        if let Some(value) = value {
             return Ok(Some(value));
         }
         self.db.get(key)

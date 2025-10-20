@@ -664,6 +664,11 @@ impl StoreEngine for Store {
 
             let mut updated_trie = false;
 
+            let span = tracing::info_span!(
+                "trie_cache_write_lock",
+                ?parent_state_root,
+                ?last_state_root
+            );
             let mut trie = trie_cache.write().map_err(|_| StoreError::LockError)?;
             if let Some(root) = trie.get_commitable(parent_state_root, COMMIT_THRESHOLD) {
                 updated_trie = true;
