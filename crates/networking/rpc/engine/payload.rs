@@ -807,6 +807,7 @@ async fn get_payload(payload_id: u64, context: &RpcApiContext) -> Result<Payload
             })?;
         (blobs_bundle, requests, block_value, payload)
     };
+    info!("get_payload: Retrieved payload successfully");
 
     let new_payload = PayloadBundle {
         block,

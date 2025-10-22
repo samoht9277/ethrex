@@ -319,14 +319,18 @@ impl Blockchain {
     /// Attempts to fetch a payload given it's id. If the payload is still being built, it will be finished.
     /// Fails if there is no payload or active payload build task for the given id.
     pub async fn get_payload(&self, payload_id: u64) -> Result<PayloadBuildResult, ChainError> {
+        tracing::info!("locking payloads");
         let mut payloads = self.payloads.lock().await;
         // Find the given payload and finish the active build process if needed
         let idx = payloads
             .iter()
             .position(|(id, _)| id == &payload_id)
             .ok_or(ChainError::UnknownPayload)?;
+        tracing::info!("found payload");
         let finished_payload = (payload_id, payloads.remove(idx).1.to_payload().await?);
+        tracing::info!("got finished payload");
         payloads.insert(idx, finished_payload);
+        tracing::info!("re-inserted payload");
         // Return the held payload
         match &payloads[idx].1 {
             PayloadOrTask::Payload(payload) => Ok(*payload.clone()),
