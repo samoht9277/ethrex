@@ -484,6 +484,7 @@ impl Store {
             }
         }
         cancel_token.cancel();
+        account_state_remover.await;
 
         /*
         for update in account_updates.iter() {
