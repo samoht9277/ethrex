@@ -448,10 +448,13 @@ impl Store {
 
             // Add or update AccountState in the trie
             // Fetch current state or create a new state to be inserted
-            let mut account_state = match state_trie.lock().await.get(&hashed_address).unwrap() {
-                Some(encoded_state) => AccountState::decode(&encoded_state).unwrap(),
-                None => AccountState::default(),
-            };
+            let mut account_state = state_trie
+                .lock()
+                .await
+                .get(&hashed_address)
+                .unwrap()
+                .map(|encoded_state| AccountState::decode(&encoded_state).unwrap())
+                .unwrap_or_default();
             if removed_storage {
                 account_state.storage_root = *EMPTY_TRIE_HASH;
             }
@@ -468,11 +471,6 @@ impl Store {
             let engine = Arc::clone(&self.engine);
             if !added_storage.is_empty() {
                 let hashed_address_h256 = H256::from_slice(&hashed_address);
-                let mut account_state = match state_trie.lock().await.get(&hashed_address).unwrap()
-                {
-                    Some(encoded_state) => AccountState::decode(&encoded_state).unwrap(),
-                    None => AccountState::default(),
-                };
                 let storage_root = account_state.storage_root;
                 let (storage_hash, storage_updates) = Store::inner_update_storage(
                     added_storage,
