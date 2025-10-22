@@ -19,6 +19,8 @@ use ethrex_rlp::encode::RLPEncode;
 use ethrex_trie::{Nibbles, NodeRLP, Trie, TrieLogger, TrieNode, TrieWitness};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sha3::{Digest as _, Keccak256};
+use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 use std::sync::Arc;
 use std::{
     collections::{BTreeMap, HashMap},
@@ -372,19 +374,35 @@ impl Store {
         };
 
         Ok(Some(
-            self.apply_account_updates_from_trie_batch(state_trie, account_updates)
+            self.apply_account_updates_from_trie_batch(Arc::new(Mutex::new(state_trie)), account_updates)
                 .await?,
         ))
     }
 
+
+    async fn account_state_remover(state_trie: Arc<Mutex<Trie>>, mut receiver: tokio::sync::mpsc::Receiver<Vec<u8>>, cancel_token: CancellationToken) {
+        while !cancel_token.is_cancelled() {
+            if !receiver.is_empty() {
+                let incoming = receiver.recv().await.unwrap();
+                state_trie.lock().await.remove(&incoming).unwrap();
+            }
+        }
+
+    }
+
     pub async fn apply_account_updates_from_trie_batch(
         &self,
-        mut state_trie: Trie,
+        mut state_trie: Arc<Mutex<Trie>>,
         account_updates: Vec<AccountUpdate>,
     ) -> Result<AccountUpdatesList, StoreError> {
         //let mut ret_storage_updates = Vec::new();
+        let cancel_token = CancellationToken::new();
         let mut code_updates = Vec::new();
-        let state_root = state_trie.hash_no_commit();
+        let state_root = state_trie.lock().await.hash_no_commit();
+
+        let (remover_sender, remover_receiver) = tokio::sync::mpsc::channel(100);
+
+        let account_state_remover = tokio::spawn(Store::account_state_remover(state_trie, remover_receiver, cancel_token.child_token()));
 
         // TODO!
         // create an actor for storage updates
@@ -400,9 +418,9 @@ impl Store {
         });
         */
 
-        let ret_storage_updates: Vec<(H256, Vec<(Nibbles, Vec<u8>)>)> = account_updates
+        let ret_storage_futures: Vec<_> = account_updates
             .into_par_iter()
-            .map(|update_for_storage| {
+            .map(async |update_for_storage| {
                 let removed = update_for_storage.removed;
                 let removed_storage = update_for_storage.removed_storage;
                 let info = &update_for_storage.info;
@@ -411,15 +429,15 @@ impl Store {
                 let added_storage = &update_for_storage.added_storage;
                 let hashed_address = hash_address(&update_for_storage.address);
 
-                //if removed {
-                //    // Remove account from trie
-                //    state_trie.remove(&hashed_address).unwrap();
-                //    return None;
-                //}
+                if removed {
+                   // Remove account from trie
+                   remover_sender.send(hashed_address).await.unwrap();
+                   return None;
+                }
 
                 // Add or update AccountState in the trie
                 // Fetch current state or create a new state to be inserted
-                let mut account_state = match state_trie.get(&hashed_address).unwrap() {
+                let mut account_state = match state_trie.lock().await.get(&hashed_address).unwrap() {
                     Some(encoded_state) => AccountState::decode(&encoded_state).unwrap(),
                     None => AccountState::default(),
                 };
@@ -439,7 +457,7 @@ impl Store {
                 let engine = Arc::clone(&self.engine);
                 if !added_storage.is_empty() {
                     let hashed_address_h256 = H256::from_slice(&hashed_address);
-                    let mut account_state = match state_trie.get(&hashed_address).unwrap() {
+                    let mut account_state = match state_trie.lock().await.get(&hashed_address).unwrap() {
                         Some(encoded_state) => AccountState::decode(&encoded_state).unwrap(),
                         None => AccountState::default(),
                     };
@@ -458,10 +476,14 @@ impl Store {
                 } else {
                     None
                 }
-            })
-            .filter(|elem| elem.is_some())
-            .map(|elem| elem.unwrap())
-            .collect::<Vec<_>>();
+            }).collect::<Vec<_>>();
+        let mut ret_storage_updates = Vec::new();
+        for fut in ret_storage_futures {
+            if let Some(update) = fut.await {
+                ret_storage_updates.push(update);
+            }
+        }
+        cancel_token.cancel();
 
         /*
         for update in account_updates.iter() {
@@ -475,7 +497,7 @@ impl Store {
             state_trie.insert(hashed_address, account_state.encode_to_vec())?;
         }
         */
-        let (state_trie_hash, state_updates) = state_trie.collect_changes_since_last_hash();
+        let (state_trie_hash, state_updates) = state_trie.lock().await.collect_changes_since_last_hash();
 
         Ok(AccountUpdatesList {
             state_trie_hash,
