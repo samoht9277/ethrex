@@ -42,7 +42,7 @@ use crate::{
 };
 
 use thiserror::Error;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 #[derive(Debug)]
 pub struct PayloadBuildTask {
@@ -353,6 +353,7 @@ impl Blockchain {
         if payloads.len() >= MAX_PAYLOADS {
             // Remove oldest unclaimed payload
             payloads.remove(0);
+            warn!("Max payloads reached, removing oldest unclaimed payload");
         }
         payloads.push((
             payload_id,
@@ -374,8 +375,10 @@ impl Blockchain {
         let self_clone = self.clone();
         const SECONDS_PER_SLOT: Duration = Duration::from_secs(12);
         // Attempt to rebuild the payload as many times within the given timeframe to maximize fee revenue
+        tracing::info!("build_payload_loop: Building initial payload");
         let mut res = self_clone.build_payload(payload.clone()).await?;
         while start.elapsed() < SECONDS_PER_SLOT && !cancel_token.is_cancelled() {
+            tracing::info!("build_payload_loop: Building next payload");
             let payload = payload.clone();
             // Cancel the current build process and return the previous payload if it is requested earlier
             if let Some(current_res) = cancel_token
@@ -393,22 +396,27 @@ impl Blockchain {
         let since = Instant::now();
         let gas_limit = payload.header.gas_limit;
 
-        debug!("Building payload");
+        tracing::info!("Building payload");
         let base_fee = payload.header.base_fee_per_gas.unwrap_or_default();
         let mut context =
             PayloadBuildContext::new(payload, &self.storage, self.options.r#type.clone())?;
 
         if let BlockchainType::L1 = self.options.r#type {
+            tracing::info!("Applying system operations");
             self.apply_system_operations(&mut context)?;
         }
+        tracing::info!("Applying withdrawals");
         self.apply_withdrawals(&mut context)?;
+        tracing::info!("Filling transactions");
         self.fill_transactions(&mut context)?;
+        tracing::info!("Extracting requests");
         self.extract_requests(&mut context)?;
+        tracing::info!("Finalizing payload");
         self.finalize_payload(&mut context).await?;
 
         let interval = Instant::now().duration_since(since).as_millis();
 
-        tracing::debug!(
+        tracing::info!(
             "[METRIC] BUILDING PAYLOAD TOOK: {interval} ms, base fee {}",
             base_fee
         );
@@ -421,7 +429,7 @@ impl Blockchain {
                 let throughput = (as_gigas) / (interval as f64) * 1000_f64;
                 metrics!(METRICS_BLOCKS.set_latest_gigagas_block_building(throughput));
 
-                tracing::debug!(
+                tracing::info!(
                     "[METRIC] BLOCK BUILDING THROUGHPUT: {throughput} Gigagas/s TIME SPENT: {interval} msecs"
                 );
             }
