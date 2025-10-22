@@ -388,16 +388,18 @@ impl Store {
         cancel_token: CancellationToken,
     ) {
         while !cancel_token.is_cancelled() {
+            info!("Account state remover active, queued: {}", receiver.len());
             if !receiver.is_empty() {
                 let incoming = receiver.recv().await.unwrap();
                 state_trie.lock().await.remove(&incoming).unwrap();
             }
         }
+        info!("Account state remover shutdown");
     }
 
     pub async fn apply_account_updates_from_trie_batch(
         &self,
-        mut state_trie: Arc<Mutex<Trie>>,
+        state_trie: Arc<Mutex<Trie>>,
         account_updates: Vec<AccountUpdate>,
     ) -> Result<AccountUpdatesList, StoreError> {
         //let mut ret_storage_updates = Vec::new();
@@ -485,7 +487,8 @@ impl Store {
             }
         }
         cancel_token.cancel();
-        account_state_remover.await;
+        info!("Awaiting account state remover shutdown");
+        account_state_remover.await.unwrap();
 
         /*
         for update in account_updates.iter() {
