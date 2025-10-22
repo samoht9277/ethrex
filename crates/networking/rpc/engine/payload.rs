@@ -782,6 +782,7 @@ fn validate_fork(block: &Block, fork: Fork, context: &RpcApiContext) -> Result<(
     Ok(())
 }
 
+#[tracing::instrument(skip(context), err)]
 async fn get_payload(payload_id: u64, context: &RpcApiContext) -> Result<PayloadBundle, RpcErr> {
     debug!("Requested payload with id: {:#018x}", payload_id);
     let (blobs_bundle, requests, block_value, block) = {

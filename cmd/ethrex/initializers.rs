@@ -56,7 +56,8 @@ pub fn init_tracing(opts: &Options) -> reload::Handle<EnvFilter, Registry> {
 
     let (filter, filter_handle) = reload::Layer::new(log_filter);
 
-    let mut layer = fmt::layer();
+    let mut layer =
+        fmt::layer().with_span_events(fmt::format::FmtSpan::ENTER | fmt::format::FmtSpan::EXIT);
 
     if !std::io::stdout().is_terminal() {
         layer = layer.with_ansi(false);
