@@ -801,9 +801,9 @@ async fn get_payload(payload_id: u64, context: &RpcApiContext) -> Result<Payload
             .await
             .map_err(|err| match err {
                 ChainError::UnknownPayload => {
-                    RpcErr::UnknownPayload(format!("Payload with id {payload_id:#018x} not found",))
+                    RpcErr::UnknownPayload(format!("Payload with id {payload_id:#018x} not found"))
                 }
-                err => RpcErr::Internal(err.to_string()),
+                err => dbg!(RpcErr::Internal(err.to_string())),
             })?;
         (blobs_bundle, requests, block_value, payload)
     };
