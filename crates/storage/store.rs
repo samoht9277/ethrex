@@ -476,6 +476,8 @@ impl Store {
                 }
             }
 
+            state_trie.lock().await.insert(hashed_address.clone(), account_state.encode_to_vec()).unwrap();
+
             let engine = Arc::clone(&self.engine);
             info!("Updating storage for acc:  {}", update_for_storage.address);
             if !added_storage.is_empty() {
@@ -498,18 +500,6 @@ impl Store {
         info!("Awaiting account state remover shutdown");
         account_state_remover.await.unwrap();
 
-        /*
-        for update in account_updates.iter() {
-
-
-
-
-
-            //  ########
-
-            state_trie.insert(hashed_address, account_state.encode_to_vec())?;
-        }
-        */
         let (state_trie_hash, state_updates) =
             state_trie.lock().await.collect_changes_since_last_hash();
 
