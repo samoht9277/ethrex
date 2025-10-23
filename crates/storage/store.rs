@@ -433,7 +433,10 @@ impl Store {
         */
 
         for update_for_storage in account_updates {
-            info!("Processing account update for acc: {}", update_for_storage.address);
+            info!(
+                "Processing account update for acc: {}",
+                update_for_storage.address
+            );
             let removed = update_for_storage.removed;
             let removed_storage = update_for_storage.removed_storage;
             let info = &update_for_storage.info;
@@ -443,22 +446,27 @@ impl Store {
             let hashed_address = hash_address(&update_for_storage.address);
 
             if removed {
-                info!("Acc: {} was removed, sending to remover task", update_for_storage.address);
+                info!(
+                    "Acc: {} was removed, sending to remover task",
+                    update_for_storage.address
+                );
                 // Remove account from trie
                 remover_sender.send(hashed_address).await.unwrap();
                 continue;
             }
 
+            info!("Obtaining state for Acc: {}", update_for_storage.address);
+
             // Add or update AccountState in the trie
             // Fetch current state or create a new state to be inserted
-            let mut account_state =  {
+            let mut account_state = {
                 state_trie
-                .lock()
-                .await
-                .get(&hashed_address)
-                .unwrap()
-                .map(|encoded_state| AccountState::decode(&encoded_state).unwrap())
-                .unwrap_or_default()
+                    .lock()
+                    .await
+                    .get(&hashed_address)
+                    .unwrap()
+                    .map(|encoded_state| AccountState::decode(&encoded_state).unwrap())
+                    .unwrap_or_default()
             };
             info!("Obtained state for Acc: {}", update_for_storage.address);
 
@@ -492,8 +500,15 @@ impl Store {
                 ret_storage_updates.push((hashed_address_h256, storage_updates));
             }
 
-            state_trie.lock().await.insert(hashed_address.clone(), account_state.encode_to_vec()).unwrap();
-            info!("Processed account update for acc: {}", update_for_storage.address);
+            state_trie
+                .lock()
+                .await
+                .insert(hashed_address.clone(), account_state.encode_to_vec())
+                .unwrap();
+            info!(
+                "Processed account update for acc: {}",
+                update_for_storage.address
+            );
         }
         info!("Cancelling remover task");
         cancel_token.cancel();
