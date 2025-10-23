@@ -404,13 +404,11 @@ impl Store {
         state_trie: Arc<Mutex<Trie>>,
         account_updates: Vec<AccountUpdate>,
     ) -> Result<AccountUpdatesList, StoreError> {
-        //let mut ret_storage_updates = Vec::new();
+        let mut ret_storage_updates = Vec::new();
         let cancel_token = CancellationToken::new();
         info!("Starting apply_account_updates_from_trie_batch");
         let mut code_updates = Vec::new();
         let state_root = state_trie.lock().await.hash_no_commit();
-
-        let mut ret_storage_updates = Vec::new();
 
         let (remover_sender, remover_receiver) = tokio::sync::mpsc::channel(100);
 
@@ -462,7 +460,7 @@ impl Store {
                 .map(|encoded_state| AccountState::decode(&encoded_state).unwrap())
                 .unwrap_or_default()
             };
-            info!("Obtained account_state for acc:  {}", update_for_storage.address);
+
             if removed_storage {
                 account_state.storage_root = *EMPTY_TRIE_HASH;
             }
@@ -475,8 +473,6 @@ impl Store {
                     code_updates.push((info.code_hash, code.clone()));
                 }
             }
-
-            state_trie.lock().await.insert(hashed_address.clone(), account_state.encode_to_vec()).unwrap();
 
             let engine = Arc::clone(&self.engine);
             info!("Updating storage for acc:  {}", update_for_storage.address);
@@ -494,6 +490,8 @@ impl Store {
                 account_state.storage_root = storage_hash;
                 ret_storage_updates.push((hashed_address_h256, storage_updates));
             }
+
+            state_trie.lock().await.insert(hashed_address.clone(), account_state.encode_to_vec()).unwrap();
         }
         info!("Cancelling remover task");
         cancel_token.cancel();
