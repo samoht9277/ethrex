@@ -500,6 +500,7 @@ impl Store {
 
         let (state_trie_hash, state_updates) =
             state_trie.lock().await.collect_changes_since_last_hash();
+        info!("Collected state trie changes");
 
         Ok(AccountUpdatesList {
             state_trie_hash,
