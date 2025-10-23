@@ -460,6 +460,7 @@ impl Store {
                 .map(|encoded_state| AccountState::decode(&encoded_state).unwrap())
                 .unwrap_or_default()
             };
+            info!("Obtained state for Acc: {}", update_for_storage.address);
 
             if removed_storage {
                 account_state.storage_root = *EMPTY_TRIE_HASH;
