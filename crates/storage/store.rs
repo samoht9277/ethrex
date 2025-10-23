@@ -388,10 +388,12 @@ impl Store {
         cancel_token: CancellationToken,
     ) {
         while !cancel_token.is_cancelled() {
-            info!("Account state remover active, queued: {}", receiver.len());
             if !receiver.is_empty() {
+                info!("AccountStateRemover: reading incoming hash");
                 let incoming = receiver.recv().await.unwrap();
+                info!("AccountStateRemover: read incoming hash");
                 state_trie.lock().await.remove(&incoming).unwrap();
+                info!("AccountStateRemover: removed account state");
             }
         }
         info!("Account state remover shutdown");
@@ -404,6 +406,7 @@ impl Store {
     ) -> Result<AccountUpdatesList, StoreError> {
         //let mut ret_storage_updates = Vec::new();
         let cancel_token = CancellationToken::new();
+        info!("Starting apply_account_updates_from_trie_batch");
         let mut code_updates = Vec::new();
         let state_root = state_trie.lock().await.hash_no_commit();
 
@@ -432,6 +435,7 @@ impl Store {
         */
 
         for update_for_storage in account_updates {
+            info!("Processing account update for acc: {}", update_for_storage.address);
             let removed = update_for_storage.removed;
             let removed_storage = update_for_storage.removed_storage;
             let info = &update_for_storage.info;
@@ -441,6 +445,7 @@ impl Store {
             let hashed_address = hash_address(&update_for_storage.address);
 
             if removed {
+                info!("Acc: {} was removed, sending to remover task", update_for_storage.address);
                 // Remove account from trie
                 remover_sender.send(hashed_address).await.unwrap();
                 continue;
@@ -448,13 +453,16 @@ impl Store {
 
             // Add or update AccountState in the trie
             // Fetch current state or create a new state to be inserted
-            let mut account_state = state_trie
+            let mut account_state =  {
+                state_trie
                 .lock()
                 .await
                 .get(&hashed_address)
                 .unwrap()
                 .map(|encoded_state| AccountState::decode(&encoded_state).unwrap())
-                .unwrap_or_default();
+                .unwrap_or_default()
+            };
+            info!("Obtained account_state for acc:  {}", update_for_storage.address);
             if removed_storage {
                 account_state.storage_root = *EMPTY_TRIE_HASH;
             }
@@ -469,6 +477,7 @@ impl Store {
             }
 
             let engine = Arc::clone(&self.engine);
+            info!("Updating storage for acc:  {}", update_for_storage.address);
             if !added_storage.is_empty() {
                 let hashed_address_h256 = H256::from_slice(&hashed_address);
                 let storage_root = account_state.storage_root;
@@ -484,6 +493,7 @@ impl Store {
                 ret_storage_updates.push((hashed_address_h256, storage_updates));
             }
         }
+        info!("Cancelling remover task");
         cancel_token.cancel();
         info!("Awaiting account state remover shutdown");
         account_state_remover.await.unwrap();
