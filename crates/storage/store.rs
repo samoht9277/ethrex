@@ -492,6 +492,7 @@ impl Store {
             }
 
             state_trie.lock().await.insert(hashed_address.clone(), account_state.encode_to_vec()).unwrap();
+            info!("Processed account update for acc: {}", update_for_storage.address);
         }
         info!("Cancelling remover task");
         cancel_token.cancel();
