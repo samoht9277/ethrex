@@ -616,13 +616,14 @@ impl Store {
 async fn account_state_remover(
     state_trie: Arc<Mutex<Trie>>,
     mut receiver: tokio::sync::mpsc::Receiver<Vec<u8>>,
-) {
+) -> Result<(), StoreError> {
     while let Some(incoming) = receiver.recv().await {
         info!("AccountStateRemover: read incoming hash");
-        state_trie.lock().await.remove(&incoming).unwrap();
+        state_trie.lock().await.remove(&incoming)?;
         info!("AccountStateRemover: removed account state");
     }
     info!("Account state remover shutdown");
+    Ok(())
 }
 
 #[async_trait::async_trait]
@@ -652,7 +653,10 @@ impl StoreEngine for Store {
             let hashed_address = hash_address(&update.address);
             if update.removed {
                 // Remove account from trie
-                remover_sender.send(hashed_address).await.unwrap();
+                remover_sender
+                    .send(hashed_address)
+                    .await
+                    .map_err(|err| StoreError::Custom(err.to_string()))?;
                 continue;
             }
             // Add or update AccountState in the trie
@@ -699,7 +703,9 @@ impl StoreEngine for Store {
         }
         // End account remover
         drop(remover_sender);
-        account_state_remover.await.unwrap();
+        account_state_remover
+            .await
+            .map_err(|err| StoreError::Custom(err.to_string()))??;
         let (state_trie_hash, state_updates) =
             state_trie.lock().await.collect_changes_since_last_hash();
 
