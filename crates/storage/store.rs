@@ -392,9 +392,9 @@ impl Store {
                 warn!("AccountStateRemover: reading incoming hash");
                 let incoming = receiver.recv().await.unwrap();
                 warn!("AccountStateRemover: read incoming hash");
-                {
-                    state_trie.lock().await.remove(&incoming).unwrap();
-                }
+                // {
+                //     state_trie.lock().await.remove(&incoming).unwrap();
+                // }
                 warn!("AccountStateRemover: removed account state");
             }
         }
