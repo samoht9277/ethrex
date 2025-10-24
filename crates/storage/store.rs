@@ -491,6 +491,7 @@ impl Store {
             let engine = Arc::clone(&self.engine);
             info!("Updating storage for acc:  {}", update_for_storage.address);
             if !added_storage.is_empty() {
+                info!("Updating storage for acc:  {} (not empty)", update_for_storage.address);
                 let hashed_address_h256 = H256::from_slice(&hashed_address);
                 let storage_root = account_state.storage_root;
                 let (storage_hash, storage_updates) = Store::inner_update_storage(
