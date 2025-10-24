@@ -345,10 +345,7 @@ impl Command {
                                     "Transaction {:#x} not found",
                                     log.transaction_hash
                                 ))?;
-                            l2_blob_hashes.extend(tx.blob_versioned_hashes.ok_or_eyre(format!(
-                                "Blobs not found in transaction {:#x}",
-                                log.transaction_hash
-                            ))?);
+                            l2_blob_hashes.extend(tx.tx.blob_versioned_hashes());
                         }
 
                         // Get blobs from block's slot and only keep L2 commitment's blobs
@@ -434,7 +431,10 @@ impl Command {
                     let updates = account_updates.values().cloned().collect::<Vec<_>>();
 
                     let account_updates_list = store
-                        .apply_account_updates_from_trie_batch(trie, updates)
+                        .apply_account_updates_from_trie_batch(
+                            current_state_root,
+                            &account_updates.into_values().collect::<Vec<_>>(),
+                        )
                         .await
                         .map_err(|e| format!("Error applying account updates: {e}"))
                         .unwrap();

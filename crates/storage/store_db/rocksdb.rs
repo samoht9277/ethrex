@@ -1,19 +1,21 @@
 use crate::{
+    AccountUpdatesList, hash_address, hash_key,
     rlp::AccountCodeHashRLP,
     trie_db::{
         layering::{TrieLayerCache, TrieWrapper, apply_prefix},
         rocksdb_locked::RocksDBLockedTrieDB,
+        rocksdb_preread::RocksDBPreRead,
     },
 };
 use bytes::Bytes;
 use ethrex_common::{
     H256,
     types::{
-        AccountState, Block, BlockBody, BlockHash, BlockHeader, BlockNumber, ChainConfig, Index,
-        Receipt, Transaction,
+        AccountState, AccountUpdate, Block, BlockBody, BlockHash, BlockHeader, BlockNumber,
+        ChainConfig, Code, Index, Receipt, Transaction,
     },
 };
-use ethrex_trie::{Nibbles, Node, Trie};
+use ethrex_trie::{EMPTY_TRIE_HASH, Nibbles, Node, Trie};
 use rocksdb::{
     BlockBasedOptions, BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded,
     Options, WriteBatch,
@@ -25,15 +27,20 @@ use std::{
 };
 use tracing::{debug, error, info};
 
+use tokio::sync::Mutex;
+
 use crate::{
     STATE_TRIE_SEGMENTS, UpdateBatch,
     api::StoreEngine,
     error::StoreError,
-    rlp::{AccountCodeRLP, BlockBodyRLP, BlockHashRLP, BlockHeaderRLP, BlockRLP},
+    rlp::{BlockBodyRLP, BlockHashRLP, BlockHeaderRLP, BlockRLP},
     trie_db::rocksdb::RocksDBTrieDB,
     utils::{ChainDataIndex, SnapStateIndex},
 };
-use ethrex_rlp::{decode::RLPDecode, encode::RLPEncode};
+use ethrex_rlp::{
+    decode::{RLPDecode, decode_bytes},
+    encode::RLPEncode,
+};
 use std::fmt::Debug;
 
 // TODO: use finalized hash to determine when to commit
@@ -92,7 +99,7 @@ const CF_SNAP_STATE: &str = "snap_state";
 /// State trie nodes column family: [`Nibbles`] => [`Vec<u8>`]
 /// - [`Nibbles`] = `node_hash.as_ref()`
 /// - [`Vec<u8>`] = `node_data`
-const CF_TRIE_NODES: &str = "trie_nodes";
+pub(crate) const CF_TRIE_NODES: &str = "trie_nodes";
 
 /// Pending blocks column family: [`Vec<u8>`] => [`Vec<u8>`]
 /// - [`Vec<u8>`] = `BlockHashRLP::from(block.hash()).bytes().clone()`
@@ -109,9 +116,9 @@ const CF_INVALID_ANCESTORS: &str = "invalid_ancestors";
 /// - [`Vec<u8>`] = `BlockHeaderRLP::from(block.header.clone()).bytes().clone()`
 const CF_FULLSYNC_HEADERS: &str = "fullsync_headers";
 
-pub const CF_FLATKEYVALUE: &str = "flatkeyvalue";
+pub(crate) const CF_FLATKEYVALUE: &str = "flatkeyvalue";
 
-pub const CF_MISC_VALUES: &str = "misc_values";
+pub(crate) const CF_MISC_VALUES: &str = "misc_values";
 
 /// Control messages for the FlatKeyValue generator
 #[derive(Debug, PartialEq)]
@@ -606,8 +613,104 @@ impl Store {
     }
 }
 
+async fn account_state_remover(
+    state_trie: Arc<Mutex<Trie>>,
+    mut receiver: tokio::sync::mpsc::Receiver<Vec<u8>>,
+) {
+    while let Some(incoming) = receiver.recv().await {
+        info!("AccountStateRemover: read incoming hash");
+        state_trie.lock().await.remove(&incoming).unwrap();
+        info!("AccountStateRemover: removed account state");
+    }
+    info!("Account state remover shutdown");
+}
+
 #[async_trait::async_trait]
 impl StoreEngine for Store {
+    async fn apply_account_updates_from_trie_batch(
+        &self,
+        state_root: H256,
+        account_updates: &[AccountUpdate],
+    ) -> Result<AccountUpdatesList, StoreError> {
+        let mut ret_storage_updates = Vec::new();
+        let mut code_updates = Vec::new();
+        let trie = Arc::new(RocksDBPreRead::new(
+            self.db.clone(),
+            account_updates,
+            self.trie_cache.clone(),
+            state_root,
+        )?);
+        let state_trie = Arc::new(Mutex::new(Trie::open(
+            Box::new(trie.state_trie()),
+            state_root,
+        )));
+        // Spawn account remover
+        let (remover_sender, remover_receiver) = tokio::sync::mpsc::channel(100);
+        let account_state_remover =
+            tokio::spawn(account_state_remover(state_trie.clone(), remover_receiver));
+        for update in account_updates {
+            let hashed_address = hash_address(&update.address);
+            if update.removed {
+                // Remove account from trie
+                remover_sender.send(hashed_address).await.unwrap();
+                continue;
+            }
+            // Add or update AccountState in the trie
+            // Fetch current state or create a new state to be inserted
+            let mut account_state = match state_trie.lock().await.get(&hashed_address)? {
+                Some(encoded_state) => AccountState::decode(&encoded_state)?,
+                None => AccountState::default(),
+            };
+            if update.removed_storage {
+                account_state.storage_root = *EMPTY_TRIE_HASH;
+            }
+            if let Some(info) = &update.info {
+                account_state.nonce = info.nonce;
+                account_state.balance = info.balance;
+                account_state.code_hash = info.code_hash;
+                // Store updated code in DB
+                if let Some(code) = &update.code {
+                    code_updates.push((info.code_hash, code.clone()));
+                }
+            }
+            // Store the added storage in the account's storage trie and compute its new root
+            if !update.added_storage.is_empty() {
+                let mut storage_trie = Trie::open(
+                    Box::new(trie.storage_trie(H256::from_slice(&hashed_address))),
+                    account_state.storage_root,
+                );
+                for (storage_key, storage_value) in &update.added_storage {
+                    let hashed_key = hash_key(storage_key);
+                    if storage_value.is_zero() {
+                        storage_trie.remove(&hashed_key)?;
+                    } else {
+                        storage_trie.insert(hashed_key, storage_value.encode_to_vec())?;
+                    }
+                }
+                let (storage_hash, storage_updates) =
+                    storage_trie.collect_changes_since_last_hash();
+                account_state.storage_root = storage_hash;
+                ret_storage_updates.push((H256::from_slice(&hashed_address), storage_updates));
+            }
+            state_trie
+                .lock()
+                .await
+                .insert(hashed_address, account_state.encode_to_vec())?;
+        }
+        // End account remover
+        drop(remover_sender);
+        account_state_remover.await.unwrap();
+        let (state_trie_hash, state_updates) =
+            state_trie.lock().await.collect_changes_since_last_hash();
+
+        Ok(AccountUpdatesList {
+            state_trie_hash,
+            state_updates,
+            storage_updates: ret_storage_updates,
+            code_updates,
+        })
+    }
+
     async fn apply_updates(&self, update_batch: UpdateBatch) -> Result<(), StoreError> {
         let db = self.db.clone();
         let trie_cache = self.trie_cache.clone();
@@ -738,9 +841,16 @@ impl StoreEngine for Store {
             }
 
             for (code_hash, code) in update_batch.code_updates {
-                let code_key = code_hash.as_bytes();
-                let code_value = AccountCodeRLP::from(code).bytes().clone();
-                batch.put_cf(&cf_codes, code_key, code_value);
+                let mut buf =
+                    Vec::with_capacity(6 + code.bytecode.len() + 2 * code.jump_targets.len());
+                code.bytecode.encode(&mut buf);
+                code.jump_targets
+                    .into_iter()
+                    .flat_map(|t| t.to_le_bytes())
+                    .collect::<Vec<u8>>()
+                    .as_slice()
+                    .encode(&mut buf);
+                batch.put_cf(&cf_codes, code_hash.0, buf);
             }
 
             // Single write operation
@@ -1106,11 +1216,17 @@ impl StoreEngine for Store {
             .map_err(StoreError::from)
     }
 
-    async fn add_account_code(&self, code_hash: H256, code: Bytes) -> Result<(), StoreError> {
-        let hash_key = code_hash.as_bytes().to_vec();
-        let code_value = AccountCodeRLP::from(code).bytes().clone();
-        self.write_async(CF_ACCOUNT_CODES, hash_key, code_value)
-            .await
+    async fn add_account_code(&self, code: Code) -> Result<(), StoreError> {
+        let hash_key = code.hash.0.to_vec();
+        let mut buf = Vec::with_capacity(6 + code.bytecode.len() + 2 * code.jump_targets.len());
+        code.bytecode.encode(&mut buf);
+        code.jump_targets
+            .into_iter()
+            .flat_map(|t| t.to_le_bytes())
+            .collect::<Vec<u8>>()
+            .as_slice()
+            .encode(&mut buf);
+        self.write_async(CF_ACCOUNT_CODES, hash_key, buf).await
     }
 
     async fn clear_snap_state(&self) -> Result<(), StoreError> {
@@ -1135,12 +1251,26 @@ impl StoreEngine for Store {
         .map_err(|e| StoreError::Custom(format!("Task panicked: {}", e)))?
     }
 
-    fn get_account_code(&self, code_hash: H256) -> Result<Option<Bytes>, StoreError> {
+    fn get_account_code(&self, code_hash: H256) -> Result<Option<Code>, StoreError> {
         let hash_key = code_hash.as_bytes().to_vec();
-        self.read_sync(CF_ACCOUNT_CODES, hash_key)?
-            .map(|bytes| AccountCodeRLP::from_bytes(bytes).to())
-            .transpose()
-            .map_err(StoreError::from)
+        let Some(bytes) = self.read_sync(CF_ACCOUNT_CODES, hash_key)? else {
+            return Ok(None);
+        };
+        let bytes = Bytes::from_owner(bytes);
+        let (bytecode, targets) = decode_bytes(&bytes)?;
+        let (targets, rest) = decode_bytes(targets)?;
+        if !rest.is_empty() || !targets.len().is_multiple_of(2) {
+            return Err(StoreError::DecodeError);
+        }
+        let code = Code {
+            hash: code_hash,
+            bytecode: Bytes::copy_from_slice(bytecode),
+            jump_targets: targets
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect(),
+        };
+        Ok(Some(code))
     }
 
     async fn get_transaction_by_hash(
@@ -1656,14 +1786,21 @@ impl StoreEngine for Store {
 
     async fn write_account_code_batch(
         &self,
-        account_codes: Vec<(H256, Bytes)>,
+        account_codes: Vec<(H256, Code)>,
     ) -> Result<(), StoreError> {
         let mut batch_ops = Vec::new();
 
         for (code_hash, code) in account_codes {
             let key = code_hash.as_bytes().to_vec();
-            let value = AccountCodeRLP::from(code).bytes().clone();
-            batch_ops.push((CF_ACCOUNT_CODES.to_string(), key, value));
+            let mut buf = Vec::with_capacity(6 + code.bytecode.len() + 2 * code.jump_targets.len());
+            code.bytecode.encode(&mut buf);
+            code.jump_targets
+                .into_iter()
+                .flat_map(|t| t.to_le_bytes())
+                .collect::<Vec<u8>>()
+                .as_slice()
+                .encode(&mut buf);
+            batch_ops.push((CF_ACCOUNT_CODES.to_string(), key, buf));
         }
 
         self.write_batch_async(batch_ops).await
