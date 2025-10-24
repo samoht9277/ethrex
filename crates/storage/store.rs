@@ -504,7 +504,7 @@ impl Store {
             );
         }
         info!("Stopping remover task");
-        remover_sender.closed().await;
+        drop(remover_sender);
         info!("Awaiting account state remover shutdown");
         account_state_remover.await.unwrap();
 
