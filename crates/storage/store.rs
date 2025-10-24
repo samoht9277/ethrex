@@ -385,18 +385,11 @@ impl Store {
     async fn account_state_remover(
         state_trie: Arc<Mutex<Trie>>,
         mut receiver: tokio::sync::mpsc::Receiver<Vec<u8>>,
-        cancel_token: CancellationToken,
     ) {
-        while !cancel_token.is_cancelled() {
-            if !receiver.is_empty() {
-                warn!("AccountStateRemover: reading incoming hash");
-                let incoming = receiver.recv().await.unwrap();
-                warn!("AccountStateRemover: read incoming hash");
-                // {
-                //     state_trie.lock().await.remove(&incoming).unwrap();
-                // }
-                warn!("AccountStateRemover: removed account state");
-            }
+        while let Some(incoming) = receiver.recv().await {
+            warn!("AccountStateRemover: read incoming hash");
+            state_trie.lock().await.remove(&incoming).unwrap();
+            warn!("AccountStateRemover: removed account state");
         }
         warn!("Account state remover shutdown");
     }
@@ -407,7 +400,6 @@ impl Store {
         account_updates: Vec<AccountUpdate>,
     ) -> Result<AccountUpdatesList, StoreError> {
         let mut ret_storage_updates = Vec::new();
-        let cancel_token = CancellationToken::new();
         info!("Starting apply_account_updates_from_trie_batch");
         let mut code_updates = Vec::new();
         let state_root = state_trie.lock().await.hash_no_commit();
@@ -417,7 +409,6 @@ impl Store {
         let account_state_remover = tokio::spawn(Store::account_state_remover(
             state_trie.clone(),
             remover_receiver,
-            cancel_token.child_token(),
         ));
 
         // TODO!
@@ -456,7 +447,6 @@ impl Store {
             //     remover_sender.send(hashed_address).await.unwrap();
             //     continue;
             // }
-
 
             // Add or update AccountState in the trie
             // Fetch current state or create a new state to be inserted
@@ -513,8 +503,8 @@ impl Store {
                 update_for_storage.address
             );
         }
-        info!("Cancelling remover task");
-        cancel_token.cancel();
+        info!("Stopping remover task");
+        remover_sender.closed().await;
         info!("Awaiting account state remover shutdown");
         account_state_remover.await.unwrap();
 
