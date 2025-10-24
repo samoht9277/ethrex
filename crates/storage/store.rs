@@ -392,7 +392,9 @@ impl Store {
                 info!("AccountStateRemover: reading incoming hash");
                 let incoming = receiver.recv().await.unwrap();
                 info!("AccountStateRemover: read incoming hash");
-                state_trie.lock().await.remove(&incoming).unwrap();
+                {
+                    state_trie.lock().await.remove(&incoming).unwrap();
+                }
                 info!("AccountStateRemover: removed account state");
             }
         }
@@ -460,14 +462,17 @@ impl Store {
             // Add or update AccountState in the trie
             // Fetch current state or create a new state to be inserted
             let mut account_state = {
-                state_trie
-                    .lock()
-                    .await
+                info!("Locking trie to get account state");
+                let state_trie = state_trie.lock().await;
+                info!("Locked trie to get account state");
+                let account_state = state_trie
                     .get(&hashed_address)
                     .unwrap()
                     .map(|encoded_state| AccountState::decode(&encoded_state).unwrap())
-                    .unwrap_or_default()
+                    .unwrap_or_default();
+                account_state
             };
+            info!("Trie lock released");
             info!("Obtained state for Acc: {}", update_for_storage.address);
 
             if removed_storage {
@@ -500,12 +505,13 @@ impl Store {
                 ret_storage_updates.push((hashed_address_h256, storage_updates));
             }
             info!("Updated storage for acc:  {}", update_for_storage.address);
-
-            state_trie
-                .lock()
-                .await
-                .insert(hashed_address.clone(), account_state.encode_to_vec())
-                .unwrap();
+            {
+                state_trie
+                    .lock()
+                    .await
+                    .insert(hashed_address.clone(), account_state.encode_to_vec())
+                    .unwrap();
+            }
             info!(
                 "Processed account update for acc: {}",
                 update_for_storage.address
@@ -517,7 +523,8 @@ impl Store {
         account_state_remover.await.unwrap();
 
         let (state_trie_hash, state_updates) =
-            state_trie.lock().await.collect_changes_since_last_hash();
+            { state_trie.lock().await.collect_changes_since_last_hash() };
+
         info!("Collected state trie changes");
 
         Ok(AccountUpdatesList {
