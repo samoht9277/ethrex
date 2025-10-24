@@ -499,6 +499,7 @@ impl Store {
                 account_state.storage_root = storage_hash;
                 ret_storage_updates.push((hashed_address_h256, storage_updates));
             }
+            info!("Updated storage for acc:  {}", update_for_storage.address);
 
             state_trie
                 .lock()
