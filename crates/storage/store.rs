@@ -447,15 +447,15 @@ impl Store {
             let added_storage = &update_for_storage.added_storage;
             let hashed_address = hash_address(&update_for_storage.address);
 
-            if removed {
-                warn!(
-                    "Acc: {} was removed, sending to remover task",
-                    update_for_storage.address
-                );
-                // Remove account from trie
-                remover_sender.send(hashed_address).await.unwrap();
-                continue;
-            }
+            // if removed {
+            //     warn!(
+            //         "Acc: {} was removed, sending to remover task",
+            //         update_for_storage.address
+            //     );
+            //     // Remove account from trie
+            //     remover_sender.send(hashed_address).await.unwrap();
+            //     continue;
+            // }
 
 
             // Add or update AccountState in the trie
