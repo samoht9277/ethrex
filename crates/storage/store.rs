@@ -27,7 +27,7 @@ use std::{
 use std::{fmt::Debug, path::Path};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 /// Number of state trie segments to fetch concurrently during state sync
 pub const STATE_TRIE_SEGMENTS: usize = 2;
 /// Maximum amount of reads from the snapshot in a single transaction to avoid performance hits due to long-living reads
@@ -389,16 +389,16 @@ impl Store {
     ) {
         while !cancel_token.is_cancelled() {
             if !receiver.is_empty() {
-                info!("AccountStateRemover: reading incoming hash");
+                warn!("AccountStateRemover: reading incoming hash");
                 let incoming = receiver.recv().await.unwrap();
-                info!("AccountStateRemover: read incoming hash");
+                warn!("AccountStateRemover: read incoming hash");
                 {
                     state_trie.lock().await.remove(&incoming).unwrap();
                 }
-                info!("AccountStateRemover: removed account state");
+                warn!("AccountStateRemover: removed account state");
             }
         }
-        info!("Account state remover shutdown");
+        warn!("Account state remover shutdown");
     }
 
     pub async fn apply_account_updates_from_trie_batch(
@@ -448,7 +448,7 @@ impl Store {
             let hashed_address = hash_address(&update_for_storage.address);
 
             if removed {
-                info!(
+                warn!(
                     "Acc: {} was removed, sending to remover task",
                     update_for_storage.address
                 );
@@ -457,7 +457,6 @@ impl Store {
                 continue;
             }
 
-            info!("Obtaining state for Acc: {}", update_for_storage.address);
 
             // Add or update AccountState in the trie
             // Fetch current state or create a new state to be inserted
@@ -473,7 +472,6 @@ impl Store {
                 account_state
             };
             info!("Trie lock released");
-            info!("Obtained state for Acc: {}", update_for_storage.address);
 
             if removed_storage {
                 account_state.storage_root = *EMPTY_TRIE_HASH;
@@ -489,9 +487,7 @@ impl Store {
             }
 
             let engine = Arc::clone(&self.engine);
-            info!("Updating storage for acc:  {}", update_for_storage.address);
             if !added_storage.is_empty() {
-                info!("Updating storage for acc:  {} (not empty)", update_for_storage.address);
                 let hashed_address_h256 = H256::from_slice(&hashed_address);
                 let storage_root = account_state.storage_root;
                 let (storage_hash, storage_updates) = Store::inner_update_storage(
@@ -505,7 +501,6 @@ impl Store {
                 account_state.storage_root = storage_hash;
                 ret_storage_updates.push((hashed_address_h256, storage_updates));
             }
-            info!("Updated storage for acc:  {}", update_for_storage.address);
             {
                 state_trie
                     .lock()
