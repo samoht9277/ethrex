@@ -412,13 +412,13 @@ impl Store {
         let mut code_updates = Vec::new();
         let state_root = state_trie.lock().await.hash_no_commit();
 
-        let (remover_sender, remover_receiver) = tokio::sync::mpsc::channel(100);
+        // let (remover_sender, remover_receiver) = tokio::sync::mpsc::channel(100);
 
-        let account_state_remover = tokio::spawn(Store::account_state_remover(
-            state_trie.clone(),
-            remover_receiver,
-            cancel_token.child_token(),
-        ));
+        // let account_state_remover = tokio::spawn(Store::account_state_remover(
+        //     state_trie.clone(),
+        //     remover_receiver,
+        //     cancel_token.child_token(),
+        // ));
 
         // TODO!
         // create an actor for storage updates
@@ -447,15 +447,15 @@ impl Store {
             let added_storage = &update_for_storage.added_storage;
             let hashed_address = hash_address(&update_for_storage.address);
 
-            if removed {
-                info!(
-                    "Acc: {} was removed, sending to remover task",
-                    update_for_storage.address
-                );
-                // Remove account from trie
-                remover_sender.send(hashed_address).await.unwrap();
-                continue;
-            }
+            // if removed {
+            //     info!(
+            //         "Acc: {} was removed, sending to remover task",
+            //         update_for_storage.address
+            //     );
+            //     // Remove account from trie
+            //     remover_sender.send(hashed_address).await.unwrap();
+            //     continue;
+            // }
 
             info!("Obtaining state for Acc: {}", update_for_storage.address);
 
@@ -521,7 +521,7 @@ impl Store {
         info!("Cancelling remover task");
         cancel_token.cancel();
         info!("Awaiting account state remover shutdown");
-        account_state_remover.await.unwrap();
+        //account_state_remover.await.unwrap();
 
         let (state_trie_hash, state_updates) =
             { state_trie.lock().await.collect_changes_since_last_hash() };
