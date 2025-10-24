@@ -17,7 +17,7 @@ use ethrex_common::{
 use ethrex_rlp::decode::RLPDecode;
 use ethrex_rlp::encode::RLPEncode;
 use ethrex_trie::{Nibbles, NodeRLP, Trie, TrieLogger, TrieNode, TrieWitness};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use sha3::{Digest as _, Keccak256};
 use std::sync::Arc;
 use std::{
@@ -399,9 +399,8 @@ impl Store {
         state_trie: Arc<Mutex<Trie>>,
         account_updates: Vec<AccountUpdate>,
     ) -> Result<AccountUpdatesList, StoreError> {
-        let mut ret_storage_updates = Vec::new();
+        let mut ret_account_updates = Vec::new();
         info!("Starting apply_account_updates_from_trie_batch");
-        let mut code_updates = Vec::new();
         let state_root = state_trie.lock().await.hash_no_commit();
 
         let (remover_sender, remover_receiver) = tokio::sync::mpsc::channel(100);
@@ -425,6 +424,15 @@ impl Store {
         });
         */
 
+        let code_updates: Vec<_> = account_updates
+            .par_iter()
+            .filter_map(|u| {
+                u.info
+                    .as_ref()
+                    .and_then(|i| u.code.as_ref().map(|c| (i.code_hash, c.clone())))
+            })
+            .collect();
+
         for update_for_storage in account_updates {
             info!(
                 "Processing account update for acc: {}",
@@ -433,7 +441,6 @@ impl Store {
             let removed = update_for_storage.removed;
             let removed_storage = update_for_storage.removed_storage;
             let info = &update_for_storage.info;
-            let code = &update_for_storage.code;
 
             let added_storage = &update_for_storage.added_storage;
             let hashed_address = hash_address(&update_for_storage.address);
@@ -470,14 +477,10 @@ impl Store {
                 account_state.nonce = info.nonce;
                 account_state.balance = info.balance;
                 account_state.code_hash = info.code_hash;
-                // Store updated code in DB
-                if let Some(code) = code {
-                    code_updates.push((info.code_hash, code.clone()));
-                }
             }
 
             let engine = Arc::clone(&self.engine);
-            if !added_storage.is_empty() {
+            let storage_update = if !added_storage.is_empty() {
                 let hashed_address_h256 = H256::from_slice(&hashed_address);
                 let storage_root = account_state.storage_root;
                 let (storage_hash, storage_updates) = Store::inner_update_storage(
@@ -489,34 +492,41 @@ impl Store {
                 )
                 .unwrap();
                 account_state.storage_root = storage_hash;
-                ret_storage_updates.push((hashed_address_h256, storage_updates));
-            }
-            {
+                Some((hashed_address_h256, storage_updates))
+            } else {
+                None
+            };
+            ret_account_updates.push((hashed_address, account_state, storage_update, removed));
+        }
+
+        let mut storage_updates = Vec::new();
+        for (pathrlp, account_state, storage_update, removed) in ret_account_updates {
+            if removed {
+                remover_sender.send(pathrlp).await.unwrap();
+            } else {
                 state_trie
                     .lock()
                     .await
-                    .insert(hashed_address.clone(), account_state.encode_to_vec())
-                    .unwrap();
+                    .insert(pathrlp, account_state.encode_to_vec())?;
             }
-            info!(
-                "Processed account update for acc: {}",
-                update_for_storage.address
-            );
+            if let Some((hashed_address, storage_update)) = storage_update {
+                storage_updates.push((hashed_address, storage_update));
+            }
         }
+
         info!("Stopping remover task");
         drop(remover_sender);
         info!("Awaiting account state remover shutdown");
         account_state_remover.await.unwrap();
 
         let (state_trie_hash, state_updates) =
-            { state_trie.lock().await.collect_changes_since_last_hash() };
-
+            state_trie.lock().await.collect_changes_since_last_hash();
         info!("Collected state trie changes");
 
         Ok(AccountUpdatesList {
             state_trie_hash,
             state_updates,
-            storage_updates: ret_storage_updates,
+            storage_updates,
             code_updates,
         })
     }
@@ -525,7 +535,7 @@ impl Store {
     fn inner_update_storage(
         added_storage: &BTreeMap<H256, U256>,
         state_root: H256,
-        hashed_address_h256: H256,
+        hashed_address: H256,
         storage_root: H256,
         engine: Arc<dyn StoreEngine>,
     ) -> Result<
@@ -536,7 +546,7 @@ impl Store {
         StoreError,
     > {
         let mut storage_trie =
-            engine.open_storage_trie(hashed_address_h256, storage_root, state_root)?;
+            engine.open_storage_trie(hashed_address, storage_root, state_root)?;
         for (storage_key, storage_value) in added_storage {
             let hashed_key = hash_key(storage_key);
             if storage_value.is_zero() {
