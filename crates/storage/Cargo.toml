@@ -23,14 +23,13 @@ sha3.workspace = true
 hex.workspace = true
 rayon.workspace = true
 rocksdb = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["rt"] }
 serde = { version = "1.0.218", features = ["derive"] }
 serde_json = "1.0.117"
-tokio = { workspace = true, features = ["rt"] }
-tokio-util.workspace = true
 
 [features]
 default = []
-rocksdb = ["dep:rocksdb", "ethrex-trie/rocksdb"]
+rocksdb = ["dep:rocksdb", "ethrex-trie/rocksdb", "dep:tokio"]
 
 [dev-dependencies]
 hex.workspace = true

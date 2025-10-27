@@ -427,9 +427,6 @@ impl Command {
 
                     let account_updates = state_diff.to_account_updates(&trie)?;
 
-                    // TODO! change this call
-                    let updates = account_updates.values().cloned().collect::<Vec<_>>();
-
                     let account_updates_list = store
                         .apply_account_updates_from_trie_batch(
                             current_state_root,
