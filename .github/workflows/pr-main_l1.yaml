@@ -205,22 +205,9 @@ jobs:
         run: |
           docker load --input /tmp/ethrex_image.tar
 
-      - name: Run Hive Simulation
-        run: chmod +x hive && ./hive --client-file .github/config/hive/clients.yaml --client ethrex --sim ${{ matrix.simulation }} --sim.limit "${{ matrix.test_pattern }}" --sim.parallelism 16 --sim.loglevel 1
-
-  run-replay:
-    name: Execute an L1 block
-    strategy:
-      matrix:
-        arch-suffix: ["", "-arm"]
-    runs-on: ubuntu-24.04${{ matrix.arch-suffix }}
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-      - name: Setup Rust Environment
-        uses: ./.github/actions/setup-rust
-
-      - name: Build
+      - name: Load hive client config
+        id: client-config
+        shell: bash
         run: |
           {
             echo "config<<EOF"
