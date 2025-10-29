@@ -2,7 +2,6 @@ FROM rust:1.90 AS chef
 
 RUN apt-get update && apt-get install -y \
     build-essential \
-    cmake \
     libclang-dev \
     libc6 \
     libssl-dev \
