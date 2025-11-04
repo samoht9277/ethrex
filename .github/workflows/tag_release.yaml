@@ -174,54 +174,10 @@ jobs:
           name: ethrex-contracts.tar.gz
           path: ethrex-contracts.tar.gz
 
-  build-docker:
-    name: "Build and publish ethrex docker image"
-    runs-on: ubuntu-latest
-
-    # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
-    permissions:
-      contents: read
-      packages: write
-      attestations: write
-      id-token: write
-      actions: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Format name
-        run: |
-          echo "TAG_VERSION=$(echo ${{ github.ref_name }} | tr -d v)" >> $GITHUB_ENV
-
-      # Pushes to ghcr.io/lambdaclass/ethrex
-      - name: Build and push L1 Docker image
-        id: push_l1
-        uses: ./.github/actions/build-docker
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG_VERSION }}
-
-      # Pushes to ghcr.io/lambdaclass/ethrex
-      - name: Build and push L2 Docker image
-        id: push_l2
-        uses: ./.github/actions/build-docker
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG_VERSION }}-l2
-          build_args: BUILD_FLAGS=--features l2,l2-sql
-
   # Creates a release on GitHub with the binaries
   finalize-release:
     needs:
       - build-ethrex
-      - build-docker
       - package-contracts
     runs-on: ubuntu-latest
     steps:
