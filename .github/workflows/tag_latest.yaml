@@ -41,6 +41,7 @@ jobs:
           echo "test"
 
   publish-apt:
+    runs-on: ubuntu-latest
     needs:
       - retag_docker_images
     permissions:
