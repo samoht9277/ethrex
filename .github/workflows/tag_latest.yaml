@@ -43,7 +43,15 @@ jobs:
   publish-apt:
     needs:
       - retag_docker_images
-    uses: lambdaclass/ethrex-apt/.github/workflows/publish-apt.yml@main
     permissions:
-      contents: write
+      contents: read
       actions: write
+    steps:
+    - name: Dispatch ethrex-apt
+      run: |
+        curl -s -X POST \
+          -H "Accept: application/vnd.github+json" \
+          -H "Authorization: Bearer ${{ github.token }}" \
+          https://api.github.com/repos/lambdaclass/ethrex-apt/actions/workflows/publish-apt.yml/dispatches \
+          -d '{"ref":"main","inputs":{"tag":"${{ github.ref_name }}"}}'
+
